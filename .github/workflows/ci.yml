@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest only
+        # 脚本本身零依赖，这里只装测试框架
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Byte-compile
+        run: python -m compileall -q scripts tests
+
+      - name: Unit tests
+        run: python -m pytest tests -q
+
+      - name: Skill frontmatter is valid
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+
+          text = pathlib.Path("SKILL.md").read_text(encoding="utf-8")
+          if not text.startswith("---"):
+              sys.exit("SKILL.md 必须以 YAML frontmatter 开头")
+          front = text.split("---")[1]
+          for key in ("name:", "description:"):
+              if key not in front:
+                  sys.exit(f"frontmatter 缺少 {key}")
+          print("SKILL.md frontmatter OK")
+          PY
+
+      - name: CLI smoke test
+        # 这三条是 skill 的核心主张，输出变了就说明行为被改动
+        run: |
+          python scripts/eval_check.py --n 20 --before 0.70 --after 0.85 \
+            | tee /tmp/a.txt
+          grep -q "无法与噪声区分" /tmp/a.txt
+          grep -q "需要约" /tmp/a.txt
+
+          python scripts/eval_check.py --b 3 --c 6 --n 20 | tee /tmp/b.txt
+          grep -q "McNemar" /tmp/b.txt
+
+          python scripts/eval_check.py --n 60 --target-delta 0.05 | tee /tmp/c.txt
+          grep -q "可检出下限" /tmp/c.txt
+          echo "eval-rigor CLI: all three modes OK"
